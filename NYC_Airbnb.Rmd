@@ -1,9 +1,3 @@
----
-title: "NYC_Airbnb_data"
-author: "Jayvardhan Singh Patyal (jp6207)"
-date: "3/19/2023"
-output: word_document
----
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
