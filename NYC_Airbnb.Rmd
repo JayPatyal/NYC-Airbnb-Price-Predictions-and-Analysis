@@ -1,0 +1,418 @@
+---
+title: "NYC_Airbnb_data"
+author: "Jayvardhan Singh Patyal (jp6207)"
+date: "3/19/2023"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+The following is an in depth analysis of the NYC Airbnb dataset from Kaggle ('https://www.kaggle.com/datasets/dgomonov/new-york-city-airbnb-open-data')
+
+The main incentive of this project is as follows:
+To understand the noticeable trends and the reason for them
+Which boroughs are popular?
+What factors result in the best borough?
+Why the prices may be the way they are
+
+
+#Loading the required libraries
+```{r}
+library(ggplot2)
+library(randomForest)
+library(tidyverse)
+library(dplyr)
+library(caret)
+library(e1071)
+```
+
+Load the NYC AirBnb dataset 
+The dataset has been attached in the submission
+```{r pressure, echo=FALSE}
+df <- read.csv('AB_NYC_2019.csv')
+head(df)
+```
+Perform EDA on the dataset to get a better understanding of the data 
+
+The following functions have been performed on the data
+Get the dimensions of the dataframe
+Get the summary of the data
+Get the structure of the data
+Find out how many blanks are present in the dataset 
+Find out column by column
+
+Reference: R in action 7.1.1
+```{r}
+dim(df)
+#There are 48895 rows and 16 columns in the dataset 
+summary(df)
+str(df)
+sum(is.na(df))
+colSums(is.na(df))
+```
+
+We can see that there are 10052 empty cells and all of them are in the reviews_per_month 
+
+We observe that all the id's are unique in the dataset so we can drop them as it has no effect.
+
+Converting the neighbourhood_group and room_type to factor from char for better analysis
+
+```{r}
+head(df)
+df_id <- table(df$id)
+max(df_id)
+
+df$neighbourhood_group <- as.factor(df$neighbourhood_group)
+df$room_type <- as.factor(df$room_type)
+
+```
+Dropping columns 'host_name', 'host_id' and 'reviews_per_month' since they have no impact on our analysis
+
+Renaming the column availability_365 to availability
+
+Dropping all the columns where availability =0 since that means that the property has not been listed for more than a year
+
+Create a new subset where every data has availability >0
+
+Get the statistics for the new dataset df2
+
+```{r}
+df2 <- df %>% select(-reviews_per_month, -id, -last_review, -host_id, -host_name)
+head(df2)
+colnames(df2)[colnames(df2) == "availability_365"] <- "availability"
+
+df2 <- subset(df2, df2['availability']!=0)
+dim(df2)
+
+str(df2)
+
+df2$neighbourhood_group <- factor(df2$neighbourhood_group)
+
+unique(df2$neighbourhood_group)
+```
+All the unnecessary columns have been dropped and other columns have been converted to the appropriate datatypes
+
+For further analysis we need to plot basic graphs for better understanding of data
+
+Plot the nighborhoods of NYC 
+
+Get the average price of booking a hotel per borough
+
+Plot the rooms by their booking demand to find the most attractive room type
+```{r}
+ggplot(data=df2)+ geom_point(aes(x=latitude, y=longitude, color=neighbourhood_group))
+
+ggplot(data = df2, aes(x = neighbourhood_group, y=price)) + 
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(title = "Neighbourhood Group vs Average Price",
+       x = "Neighbourhood Group", y = "Average Price of each Booking")
+
+ggplot(data = df2) +
+  geom_boxplot(mapping = aes(x=neighbourhood_group, y=price)) + coord_cartesian(ylim=c(0,2000))
+
+
+ggplot(data = df2, aes(room_type)) + geom_bar(stat = "count", fill = "black")
+
+
+# price of rooms for each room type of the top 30 rooms
+price_listing <- df2 %>% select(price) %>% group_by(price) %>% count(price) %>% top_n(30)
+
+#ploting data with respect to price and number of listing
+
+ggplot(price_listing,aes(price,n)) + geom_line(color="blue")
+
+# get a better understanding by creating an upper limit of 1500
+
+ggplot(price_listing,aes(price,n)) + 
+  geom_line(color="blue") + coord_cartesian(xlim=c(0,1500)) + xlab("Price") + 
+  ylab("listings")
+
+#Get the avg cost of a neighborhood
+averagecost_neigbourhoodgroup <- df2 %>% group_by(neighbourhood_group) %>% 
+  summarise(price = round(mean(price),2))
+
+#Get the count vs price for each roomtype 
+price_roomtype_count  <- df2  %>% group_by(room_type,price) %>%  summarise(n_count = n())
+ggplot(price_roomtype_count,aes(price,n_count)) + geom_point(color="red") + facet_wrap(~room_type) + coord_cartesian(xlim=c(0,799))
+
+```
+In plot 1 we divide and highlight all the boroughs of nyc where the airbnb's are located.
+
+Plots 2 and 3 tell us which boroughs have what prices on average, where we can observe Manhattan is the most expensive borough with Brooklyn in 2 place and Staten Island in last place
+
+Plot 4 describes which room type has the most bookings of all with entire home/apt over 16000 and shared room being the least desired.
+
+Plots 5 and 6 show us the most booked listings with respect to price it costs, ideally the most booked listing are between $100 and $200.
+
+The average booking price for the boroughs shows that Manhattan is the most expensive borough with $214.20 almost $80 more than next one and Bronx being the cheapest option with $89.
+
+Plot 7 shows number of listing of each room type with respect to price. We can observe that most popular rooms regardless of the type cost between $0 and $200
+
+Performing Regression on the data using lm() and glm() to see which model is better.
+
+The model formula is the same three predictor variables: minimum_nights, number_of_reviews, and availability with the outcome variable as price.
+
+These 3 factors were chosen because we can observe from the plots that the price is usually between $100-$200 and it needs to be available along the number of reviews for better understanding of the listing.
+
+## Linear Regression ##
+
+We perform both glm() and lm() on this dataset to see if there is any difference. We model the relationship between price and minimum_nights, number_of_reviews, and availability.
+
+Reference: R in action 8.2.1
+
+```{r}
+head(df2)
+model <- lm(price ~ minimum_nights + number_of_reviews + availability, data = df2)
+summary(model)
+
+glm_model <- glm(price ~ minimum_nights + number_of_reviews + availability, data = df2, family = gaussian(link = "identity"))
+summary(glm_model)
+```
+
+From the above Linear regressions we can see that the two models are not too different.Both models have the same predictor variables and similar estimates for the coefficients of the predictor variables. The glm model has a slightly larger AIC value than the lm model, indicating that the lm model may be a slightly better fit for the data.
+
+We can see that the p-value is less than 0.05 indicating that these predictor variables are good predictors of the response variable.
+
+The F-statistic along with p-value tell us that the model as a whole is statistically significant at the 0.05 level
+
+The intercept is 145.55527. This is the expected value of the price when all predictor variables are equal to zero.
+
+The R-squared value is 0.01136, which tells us that ~1% of the variability in the response variable is explained by the predictor variables, which is excellent in our model.
+
+
+## K-Means Clustering ##
+
+We use 5 centers to represent 5 boroughs of nyc and use the coordinates 
+
+First we need to scale the data such that we can create clusters without any biases towards the model
+Pass the scaled data and the number of clusters as arguments to the function and visulize the model
+
+We can then examine the characteristics of the clusters
+
+Reference: R in action 5.2.2
+```{r}
+
+set.seed(123)
+scaled_data <- scale(df2[, c("price", "minimum_nights", "number_of_reviews", "availability")])
+wss <- numeric(20)
+for (i in 1:20) wss[i] <- sum(kmeans(scaled_data, centers = i)$withinss)
+plot(1:20, wss, type = "b", pch = 19, frame = FALSE, xlab = "Number of clusters K", ylab = "Total within-clusters sum of squares")
+
+# Perform the kmeans clustering with 5 clusters
+set.seed(123)
+kmeans_model <- kmeans(scaled_data, centers = 5)
+
+# Visualize the clusters
+df2$cluster <- as.factor(kmeans_model$cluster)
+ggplot(df2, aes(x = longitude, y = latitude, color = cluster)) +
+  geom_point(alpha = 0.5, size = 1) +
+  scale_color_discrete(name = "Cluster") +
+  theme_minimal()
+
+# Examine the characteristics of the clusters
+cluster_means <- aggregate(scaled_data, by = list(kmeans_model$cluster), FUN = mean)
+colnames(cluster_means)[1] <- "cluster"
+cluster_sds <- aggregate(scaled_data, by = list(kmeans_model$cluster), FUN = sd)
+colnames(cluster_sds)[1] <- "cluster"
+cluster_stats <- merge(cluster_means, cluster_sds, by = "cluster")
+print(cluster_stats)
+
+
+```
+The elbow of the plot shows the ideal number of cluster is 5.
+
+The above plot compared to plot 1 (the borough division) tells us that the clusters are not conforming to their respective boroughs and that there are overlaps. The model plot can be interpreted as not having huge clusters instead having small clusters spread out throughout nyc. 
+
+From the numerical results we can see that clusters 1 and 2 have lower prices and minimum nights compared to the other clusters. 
+
+from the number of reviews column, for cluster 1 suggests that this cluster has more reviews compared to the other clusters.
+
+cluster 3 has higher availability compared to the other clusters.
+
+Cluster 4 has the highest mean price and minimum nights.
+
+## Random Forest ##
+
+Before we perform any algorithm on the model or divide it, we first need to add another column that tells us whether the price of the model is above or below the median price.
+
+After that we divide the data in 70-30 train-test ratio. 
+
+We perform the random forest algorithm on the training dataset and do it with ntrees = 500
+
+Later we validate our model using the validation dataset.
+
+
+```{r}
+set.seed(1234)
+
+df2$price_binary <- ifelse(df2$price > median(df2$price), "Above Median", "Below Median")
+df2$price_binary <- as.factor(df2$price_binary)
+df2.train <- sample(nrow(df2), 0.7*nrow(df2))
+train <- sample(nrow(df2), 0.7*nrow(df2))
+df2.train <- df2[train,]
+df2.validate <- df2[-train,]
+
+rf_model0 <- randomForest(price_binary ~ ., data = df2.train, ntree = 500, importance = TRUE)
+
+# Make predictions on the testing data
+rf_pred <- predict(rf_model0, newdata = df2.validate)
+
+rf_model1 <- randomForest(price ~ ., data = df2.train, ntree = 500, importance = TRUE)
+
+# Make predictions on the testing data
+rf_pred1 <- predict(rf_model1, newdata = df2.validate)
+
+# Variable importance plot
+varImpPlot(rf_model1)
+print(summary(rf_model1))
+
+# Evaluate model performance
+rmse <- sqrt(mean((df2.validate$price - rf_pred1)^2))
+cat("RMSE:", rmse, "\n")
+
+accuracy <- confusionMatrix(rf_pred, df2.validate$price_binary)$overall["Accuracy"]
+accuracy
+
+# Variable importance plot
+varImpPlot(rf_model1)
+print(summary(rf_model1))
+
+```
+
+
+We get the optimal tree in our random forest model with the accuracy of the model1 = 100%. And in the summary when we plot the variance importance graph for it we can see that price has the most impact followed by avalability and no of reviews.The RMSE of model0 is $140 above the median price for an average booking.
+
+## SVM ##
+
+Using the split of the data from random forest prediction we can use it for SVM.
+
+We train the data using df2.train and validate using df2.validate.
+
+```{r}
+svm_model <- svm(price_binary ~ neighbourhood_group + latitude + longitude + room_type, data = df2.train)
+# make predictions on test set
+svm_pred <- predict(svm_model, newdata = df2.validate)
+
+# view confusion matrix
+confusionMatrix(svm_pred, df2.validate$price_binary)
+```
+
+In the prediction model there were 3870 true positive predictions and 3792 true negative predictions. There were also 925 false positive predictions and 822 false negative predictions.
+
+accuracy of the model is 81.43%, which is good but shows that svm may not be the best model for this data since the number of variables are few. 
+
+The sensitivity of the model is 0.8248, meaning that it correctly identified 82.48% of the listings that were actually above the median price. The specificity of the model is 0.8039, meaning that it correctly identified 80.39% of the listings that were actually below the median price.
+
+The kappa value for the model is 0.6287 which tells us the model is decent but not great for this dataset.
+
+Overall, the model has performed reasonably well, as it is predicting both classes with similar accuracy.
+
+### Statistical Analysis ###
+
+## ANOVA ##
+
+In the anova model we will use all the previously selected predictor variables to see which ones are important in our overall analysis of the model
+
+Reference: R in action 9.3
+```{r}
+model_aov <- aov(price ~ neighbourhood_group + latitude + longitude + room_type + minimum_nights + number_of_reviews + availability, data = df2)
+
+summary(model_aov)
+```
+
+The above model has 4 degrees of freedom meaning there are 4 categories of neighbourhood_group
+
+From the above result we can see that all the predictor variables except for minimum nights is significant as their p-value is less than 0.05, however minimum_nights shows that it is not a significant predictor of price with p-value 0.62.
+
+## T-Test ##
+
+We perform Welch's two-sample t-tests comparing the mean prices of properties in different boroughs of New York City.
+
+We will use this test to find significant difference between the mean prices of two groups.
+
+Reference: R in action 7.4
+```{r}
+# Create a t-test function for comparing two boroughs
+group_ttest <- function(data, group_by, group1, group2) {
+  price1 <- data$price[data[[group_by]] == group1]
+  price2 <- data$price[data[[group_by]] == group2]
+  result <- t.test(price1, price2)
+  return(result)
+}
+
+# Call the function with your data and grouped variable
+boroughs <- as.character(unique(df2$neighbourhood_group))
+boroughs
+for(i in seq(length(boroughs)-1)){
+  for(j in seq(length(boroughs)):(i+1)){
+    if(i!=j){
+      print(paste(boroughs[i]," - ", boroughs[j], "comparison", sep = " "))
+      res <- group_ttest(df2, "neighbourhood_group", boroughs[i], boroughs[j])
+      print(res)
+    }
+  }
+}
+
+```
+
+From the above output we can see that there is significant difference in each borough except for Queens and Staten Island. The mean property prices in Manhattan are significantly higher than in all other boroughs, with a difference ranging from about $75,000 to $120,000. 
+
+The mean property prices in Brooklyn are significantly higher than in Queens and the Bronx.
+
+The mean property prices in Staten Island are not significantly different from those in Queens or Brooklyn, but they are significantly lower than in Manhattan.
+
+We can see that the p-value is less than 0.05 for each comparison except for Staten Island with Manhattan, Bronx, Queens and Brooklyn  which can be explained by the price disparity in the boroughs.
+
+## Chi-squared test ##
+
+In the data we can use the chi-squared test to determine if there is a relationship between the neighborhood group and room type.
+
+```{r}
+
+df2_table <- table(df2$neighbourhood_group, df2$room_type)
+
+chi_test <- chisq.test(df2_table)
+chi_test
+df2_table
+chi_test$expected
+```
+The p-value is less than 0.05, which means that there is a significant association between neighborhood group and room type.
+
+We can see that the observed frequencies are different from the expected frequencies, which is why we reject the null hypothesis and conclude that there is a significant association between neighborhood group and room type in the data.
+
+Next, we use the chi-squared test to determine if there is a relationship between the neighborhood group and price_binary.
+```{r}
+df2_table1 <- table(df2$neighbourhood_group, df2$price_binary)
+
+chi_test1 <- chisq.test(df2_table1)
+chi_test1
+df2_table1
+chi_test1$expected
+```
+
+We come to the same conclusion as above when we look at the neighbourhood_group and price binary, which is that there is a significant association between neighborhood group and price in the data.
+
+## Conclusion ##
+
+Q.1)To understand the noticeable trends and the reason for them?
+
+The noticeable trend is that people prefer private house/apt over shared and that most people prefer to spend upto $200 for their stay.
+
+Q.2)Which boroughs are popular?
+
+The most popular boroughs are Manhattan followed by Brooklyn
+
+Q.3)What factors result in the best result?
+
+The price and location and room type play the biggest roles in a person deciding where to stay given that the place is available
+
+Q.4) Why the prices may be the way they are?
+
+The prices can be allocated to the location and room types that are available. For e.x. since Staten Island is far away it is the least popular borough and the cheapest.
+
+
+
